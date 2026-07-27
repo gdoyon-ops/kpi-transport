@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KPI Chargement Chantier — Beauce Atlas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    /* Thème Beauce Atlas — charbon / rouge / blanc.
+       Les noms de variables restent (--navy, --orange...) pour
+       ne rien casser ailleurs ; seules les valeurs changent. */
+    --navy: #1A1A1A; --navy-light: #2E2E2E; --navy-pale: #F0EDED;   /* charbon / noir */
+    --orange: #D6001C; --orange-dark: #A50016;                      /* rouge Beauce Atlas */
+    --green: #2E7D32; --green-pale: #E4F0E5;                        /* statut « à jour » */
+    --red: #C62828; --red-pale: #FBEAEA;                           /* statut « retard » */
+    --blue: #B0000F; --blue-pale: #F7E7E9;                         /* accent secondaire (rouge sombre) */
+    --gray: #5E5E5E; --gray-pale: #F2F2F2; --border: #D8D2D2;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; background: #F5F6F8; color: #1F2937; padding-bottom: 3rem; }
+
+  header { background: var(--navy); color: #fff; padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  header h1 { font-size: 21px; font-weight: 700; }
+  header h1 span { color: var(--orange); }
+  header .sub { font-size: 13px; color: #C9C4C4; margin-top: 2px; }
+  .header-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .header-controls label { font-size: 12px; color: #C9C4C4; display: block; margin-bottom: 2px; }
+  .header-controls input[type="date"], .header-controls input[type="number"], .header-controls select {
+    font-family: Calibri, sans-serif; font-size: 14px; padding: 5px 8px; border-radius: 5px;
+    border: 1px solid var(--navy-light); background: var(--navy-light); color: #fff;
+  }
+  .header-controls input[type="number"] { width: 58px; }
+  .btn-import { background: var(--orange); color: #fff; border: none; padding: 9px 18px; border-radius: 6px; font-family: Calibri, sans-serif; font-size: 15px; font-weight: 700; cursor: pointer; }
+  .btn-import:hover { background: var(--orange-dark); }
+
+  .settings { background: var(--navy-light); color: #D8D2D2; padding: 8px 28px; font-size: 13px; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+  .settings label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .settings input[type="text"] { font-family: Calibri, sans-serif; font-size: 13px; padding: 4px 8px; border-radius: 5px; border: 1px solid #4A2A2A; background: var(--navy); color: #fff; width: 320px; }
+  .settings .hint { color: #B8B2B2; }
+
+  .container { max-width: 1220px; margin: 0 auto; padding: 20px 24px; }
+
+  .dropzone { border: 2px dashed var(--border); border-radius: 10px; background: #fff; padding: 44px 24px; text-align: center; color: var(--gray); font-size: 15px; margin-top: 8px; cursor: pointer; transition: border-color .15s, background .15s; }
+  .dropzone.drag { border-color: var(--orange); background: #FFF7EF; }
+  .dropzone strong { color: var(--navy); }
+
+  .banner { border-radius: 10px; padding: 16px 22px; margin: 14px 0 18px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .banner.ok { background: var(--green-pale); border: 1px solid #A9CFAB; }
+  .banner.bad { background: var(--red-pale); border: 1px solid #E5A3A3; }
+  .banner .big { font-size: 28px; font-weight: 700; }
+  .banner.ok .big { color: var(--green); }
+  .banner.bad .big { color: var(--red); }
+  .banner .desc { font-size: 14px; color: #374151; max-width: 420px; }
+  .banner .meta { margin-left: auto; text-align: right; font-size: 12px; color: var(--gray); }
+  .btn-copy { background: var(--navy); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; font-family: Calibri, sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .btn-copy:hover { background: var(--navy-light); }
+
+  .trend { background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px 12px; margin-bottom: 20px; }
+  .regle-banner { background: var(--navy-pale); border: 1px solid #E0D6D6; border-radius: 8px; padding: 10px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #3A3A3A; }
+  .rb-left { display: flex; align-items: center; gap: 8px; }
+  .rb-badge { background: var(--gray); color: #fff; font-weight: 700; font-size: 12px; padding: 3px 12px; border-radius: 20px; }
+  .rb-badge.sim { background: var(--green); }
+  .rb-txt { color: #6E6868; }
+  .rb-right { text-align: right; margin-left: auto; }
+  .rb-right strong { color: var(--navy); }
+  .rb-warn { color: var(--orange-dark); }
+  .trend h3 { font-size: 14px; color: var(--navy); margin-bottom: 10px; }
+  .trend h3 small { font-weight: 400; color: var(--gray); }
+  .trend-bars { display: flex; align-items: flex-end; gap: 8px; height: 90px; }
+  .trend-day { flex: 1; max-width: 64px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .trend-bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--red); min-height: 2px; }
+  .trend-bar.zero { background: var(--green); height: 4px !important; }
+  .trend-val { font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 2px; }
+  .trend-lbl { font-size: 10px; color: var(--gray); margin-top: 4px; text-align: center; line-height: 1.2; }
+  .btn-clear { font-size: 11px; color: var(--gray); background: none; border: none; cursor: pointer; text-decoration: underline; float: right; font-family: Calibri, sans-serif; }
+
+  .usine { background: #fff; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 22px; overflow: hidden; }
+  .usine-head { background: var(--navy); color: #fff; padding: 11px 20px; display: flex; align-items: center; justify-content: space-between; }
+  .usine-head h2 { font-size: 17px; font-weight: 700; }
+  .pill { font-size: 12px; padding: 3px 12px; border-radius: 20px; font-weight: 700; }
+  .pill.ok { background: var(--green); color: #fff; }
+  .pill.bad { background: var(--red); color: #fff; }
+  .usine-body { padding: 18px 20px; }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .kpi { border-radius: 8px; padding: 12px 14px; }
+  .kpi .lbl { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; font-weight: 700; margin-bottom: 4px; }
+  .kpi .val { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .kpi .det { font-size: 12px; margin-top: 3px; }
+  .kpi.k-retard.bad { background: var(--red-pale); } .kpi.k-retard.bad .lbl, .kpi.k-retard.bad .val { color: var(--red); } .kpi.k-retard.bad .det { color: #8f4444; }
+  .kpi.k-retard.ok { background: var(--green-pale); } .kpi.k-retard.ok .lbl, .kpi.k-retard.ok .val { color: var(--green); } .kpi.k-retard.ok .det { color: #4a6d4c; }
+  .kpi.k-couv { background: var(--navy-pale); } .kpi.k-couv .lbl, .kpi.k-couv .val { color: var(--navy); } .kpi.k-couv .det { color: #6E6868; }
+  .kpi.k-pret { background: var(--blue-pale); } .kpi.k-pret .lbl, .kpi.k-pret .val { color: var(--blue); } .kpi.k-pret .det { color: #7A5252; }
+  .kpi.k-fab { background: #FDF1E3; } .kpi.k-fab .lbl, .kpi.k-fab .val { color: var(--orange-dark); } .kpi.k-fab .det { color: #a06a35; }
+
+  .tl-wrap { margin: 6px 0 16px; }
+  .tl-title { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+  .tl { display: flex; align-items: flex-end; gap: 6px; overflow-x: auto; padding: 6px 2px 0; }
+  .tl-day { flex: 1; min-width: 52px; text-align: center; }
+  .tl-bar { display: flex; flex-direction: column-reverse; height: 110px; border-radius: 4px 4px 0 0; overflow: hidden; background: var(--gray-pale); }
+  .tl-bar.window { outline: 2px solid var(--orange); outline-offset: -2px; }
+  .seg { width: 100%; }
+  .seg.charge { background: #9AA5B1; }
+  .seg.pret { background: var(--blue); }
+  .seg.retard-seg { background: var(--red); }
+  .seg.pasfab { background: var(--orange); }
+  .tl-lbl { font-size: 11px; color: var(--gray); margin-top: 4px; line-height: 1.2; }
+  .tl-rem { font-size: 11px; font-weight: 700; color: var(--navy); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #374151; margin-top: 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .sw { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+  th { background: var(--navy-pale); color: var(--navy); text-align: left; padding: 7px 9px; font-size: 12px; text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
+  td { padding: 7px 9px; border-bottom: 1px solid #EDEFF3; white-space: nowrap; }
+  tr.late td { background: #FDF3F3; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .tag.r { background: var(--red-pale); color: var(--red); }
+  .tag.o { background: #FDF1E3; color: var(--orange-dark); }
+  .tag.g { background: var(--green-pale); color: var(--green); }
+  .tag.b { background: var(--blue-pale); color: var(--blue); }
+  .sec-title { font-size: 14px; font-weight: 700; color: var(--navy); margin: 18px 0 4px; }
+  .sec-title small { font-weight: 400; color: var(--gray); }
+  .empty-note { font-size: 13px; color: var(--gray); padding: 8px 0; }
+  .footnote { font-size: 12px; color: var(--gray); margin-top: 10px; line-height: 1.6; }
+  @media print { .dropzone, .btn-import, .settings, .btn-copy, .btn-clear { display: none; } body { background: #fff; } .usine, .trend { break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex; align-items:center; gap:14px;">
+    <svg width="46" height="46" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0" aria-label="Beauce Atlas">
+      <rect x="4" y="4" width="92" height="92" rx="10" fill="#1A1A1A"/>
+      <rect x="4" y="4" width="92" height="14" rx="10" fill="#D6001C"/>
+      <rect x="4" y="11" width="92" height="7" fill="#D6001C"/>
+      <text x="50" y="72" font-family="Calibri, Arial, sans-serif" font-size="44" font-weight="700" fill="#fff" text-anchor="middle">BA</text>
+    </svg>
+    <div>
+      <h1>KPI Chargement <span>Chantier</span></h1>
+      <div class="sub">Beauce Atlas — Usines 1 · 2 · 3 (BGL) — Objectif : 0 séquence en retard</div>
+    </div>
+  </div>
+  <div class="header-controls">
+    <div>
+      <label for="importDate">Date d'importation</label>
+      <input type="date" id="importDate">
+    </div>
+    <div>
+      <label for="windowDays">Fenêtre (j. ouvrables)</label>
+      <input type="number" id="windowDays" min="1" max="15" value="5">
+    </div>
+    <div>
+      <label for="regleSelect">Règle de mesure</label>
+      <select id="regleSelect">
+        <option value="regle45k">45 000 lbs / chargement</option>
+        <option value="simulateur">Simulateur (.fabT)</option>
+      </select>
+    </div>
+    <button class="btn-import" id="btnImport">Importer le rapport ERP</button>
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
+  </div>
+</header>
+
+<div class="settings">
+  <label><input type="checkbox" id="chkFeries" checked> Exclure les fériés du Québec</label>
+  <span>
+    Fermetures usine additionnelles :
+    <input type="text" id="customHolidays" placeholder="2026-07-20, 2026-07-21, ... (AAAA-MM-JJ)">
+  </span>
+  <span id="simControls" style="display:none">
+    Simulation : <strong id="simStatus" style="color:#fff">aucune importée</strong>
+    <button id="btnSim" style="font-family:Calibri,sans-serif;font-size:12px;padding:4px 10px;border-radius:5px;border:none;background:var(--orange);color:#fff;font-weight:700;cursor:pointer;margin-left:6px">Importer JSON simulateur</button>
+    <button id="btnSimClear" style="font-family:Calibri,sans-serif;font-size:11px;background:none;border:none;color:#B8B2B2;cursor:pointer;text-decoration:underline">vider</button>
+    <input type="file" id="simFile" accept=".json" style="display:none">
+  </span>
+  <span class="hint">Note : 90 % des chantiers sont aux É.-U. — les fériés s'appliquent au calendrier de chargement de l'usine, pas au chantier.</span>
+</div>
+
+<div id="syncBar" style="display:none; padding:8px 28px; font-size:13px; align-items:center; gap:12px;">
+  <span id="syncDot" style="width:9px;height:9px;border-radius:50%;background:#999;display:inline-block;"></span>
+  <span id="syncMsg">—</span>
+  <span id="syncMeta" style="color:#8A8484;margin-left:auto;"></span>
+</div>
+
+<div class="container">
+  <div class="dropzone" id="dropzone">
+    <strong>Glisse le fichier Excel ici</strong> ou clique pour choisir<br>
+    <span style="font-size:13px">Rapport ERP transport (.xlsx) — les lignes «Acier Brut» sont exclues automatiquement</span>
+  </div>
+  <div id="results"></div>
+</div>
+
+<script>
+/* ============================================================
+   BA-REGLES-CHARGEMENT v1.0 — Règles de mesure interchangeables
+   ------------------------------------------------------------
+   Compagnon de BA-Schema v1.0 (fonctionne aussi sans lui).
+   Rôle : calculer le besoin en remorques d'une séquence selon
+   une règle interchangeable, sans que l'app consommatrice
+   (KPI chargement, cour, cédule) ait à connaître la règle.
+
+   Règles disponibles :
+     "regle45k"   — 45 000 lbs par chargement, arrondi supérieur
+                    (règle de départ, approximation volontaire)
+     "simulateur" — nombre réel de remorques issu du simulateur
+                    (.fabT), importé via BA_chargements_*.json
+                    ou BA_simulation_*.json. Repli automatique
+                    sur regle45k si la séquence n'est pas simulée.
+     "tempsEstime" — RÉSERVÉ phase 3. Non calibré : lève une
+                    erreur tant que des durées réelles de
+                    chargement (scan) ne sont pas disponibles.
+
+   Convention : poids en LBS à l'entrée (langage opérationnel
+   ERP/plancher). BA-Schema interne est en kg — utiliser
+   util.lbVersKg / kgVersLb pour convertir au besoin.
+
+   Copier ce bloc tel quel dans chaque app (single-file HTML),
+   ou charger ba-regles-chargement.js.
+   ============================================================ */
+
+const BAReglesChargement = (() => {
+
+  const VERSION = "1.0";
+  const LBS_PAR_REMORQUE = 45000;
+  const KG_PAR_LB = 0.45359237;
+
+  /* ---------- Index des simulations importées ----------
+     Clé : "PROJET|SEQUENCE" (ex. "1499|761"). Valeur :
+     { nbRemorques, source, genere } */
+  let simIndex = {};
+  let simMeta = null;
+
+  const cle = (projetId, sequenceId) =>
+    String(projetId).trim() + "|" + String(sequenceId).trim();
+
+  /* ---------- Définition des règles ---------- */
+  const regles = {
+
+    regle45k: {
+      id: "regle45k",
+      nom: "45 000 lbs / chargement",
+      description: "Poids ÷ 45 000 lbs, arrondi à l'unité supérieure. " +
+        "Ex. 110 000 lbs = 2,44 → 3 remorques. Poids 0 = séquence " +
+        "jumelée = aucun besoin.",
+      calculer(seq) {
+        const poids = Number(seq.poidsLbs) || 0;
+        const pct = borne(seq.pctCharge);
+        const total = poids > 0 ? Math.ceil(poids / LBS_PAR_REMORQUE) : 0;
+        const restantes = (pct >= 100 || poids <= 0)
+          ? 0
+          : Math.ceil(poids * (1 - pct / 100) / LBS_PAR_REMORQUE);
+        return resultat("regle45k", total, restantes, false, null);
+      }
+    },
+
+    simulateur: {
+      id: "simulateur",
+      nom: "Simulateur de remorques (.fabT)",
+      description: "Nombre réel de remorques calculé par le simulateur " +
+        "(règles physiques et d'affaires validées sur le projet 1499). " +
+        "Repli automatique sur la règle 45 000 lbs pour toute séquence " +
+        "absente de la simulation importée.",
+      calculer(seq) {
+        const hit = simIndex[cle(seq.projetId, seq.sequenceId)];
+        if (!hit) {
+          const r = regles.regle45k.calculer(seq);
+          r.regle = "simulateur";
+          r.repli = true;
+          r.note = "séquence non simulée — règle 45 000 lbs appliquée";
+          return r;
+        }
+        const pct = borne(seq.pctCharge);
+        const poids = Number(seq.poidsLbs) || 0;
+        const total = poids <= 0 ? 0 : hit.nbRemorques;
+        const restantes = (pct >= 100 || poids <= 0)
+          ? 0
+          : Math.ceil(total * (1 - pct / 100));
+        return resultat("simulateur", total, restantes, false, hit.source);
+      }
+    },
+
+    tempsEstime: {
+      id: "tempsEstime",
+      nom: "Temps de chargement (phase 3 — non calibré)",
+      description: "Réservé. Sera activé quand le scan des connexions " +
+        "fournira des durées réelles de chargement par type de remorque.",
+      calculer() {
+        throw new Error("BAReglesChargement: la règle 'tempsEstime' n'est " +
+          "pas calibrée. Utiliser 'regle45k' ou 'simulateur'.");
+      }
+    }
+  };
+
+  function borne(pct) {
+    const n = Number(pct);
+    return isNaN(n) ? 0 : Math.min(Math.max(n, 0), 100);
+  }
+
+  function resultat(regle, remTotal, remRestantes, repli, source) {
+    return { regle, remTotal, remRestantes, repli: !!repli, source: source || null };
+  }
+
+  /* ---------- Import d'une simulation ----------
+     Accepte, dans l'ordre de préférence :
+     1. Un document BA-Schema avec chargements[] :
+        chaque chargement a projetId, sequenceId, remorqueId —
+        on compte les remorques distinctes par séquence.
+     2. Un export direct du simulateur :
+        { simulations: [{ projet, sequence, nbRemorques }] }
+     Retourne { ok, sequences, erreurs } et alimente simIndex. */
+  function chargerSimulation(doc) {
+    const erreurs = [];
+    let ajoutees = 0;
+    if (!doc || typeof doc !== "object") {
+      return { ok: false, sequences: 0, erreurs: ["document invalide"] };
+    }
+    simMeta = doc.meta || null;
+
+    if (Array.isArray(doc.chargements) && doc.chargements.length) {
+      const parSeq = {};
+      doc.chargements.forEach((c, i) => {
+        const p = c.projetId != null ? c.projetId : c.projet;
+        const s = c.sequenceId != null ? c.sequenceId : c.sequence;
+        if (p == null || s == null) { erreurs.push("chargement #" + i + " sans projet/séquence"); return; }
+        const k = cle(p, s);
+        if (!parSeq[k]) parSeq[k] = new Set();
+        parSeq[k].add(String(c.remorqueId != null ? c.remorqueId : (c.id != null ? c.id : "R" + i)));
+      });
+      Object.entries(parSeq).forEach(([k, set]) => {
+        simIndex[k] = { nbRemorques: set.size, source: "chargements", genere: simMeta && simMeta.genere || null };
+        ajoutees++;
+      });
+    }
+
+    if (Array.isArray(doc.simulations) && doc.simulations.length) {
+      doc.simulations.forEach((s, i) => {
+        const p = s.projetId != null ? s.projetId : s.projet;
+        const q = s.sequenceId != null ? s.sequenceId : s.sequence;
+        const n = Number(s.nbRemorques);
+        if (p == null || q == null || !(n >= 0)) { erreurs.push("simulation #" + i + " incomplète"); return; }
+        simIndex[cle(p, q)] = { nbRemorques: Math.ceil(n), source: "simulations", genere: simMeta && simMeta.genere || null };
+        ajoutees++;
+      });
+    }
+
+    if (!ajoutees && !erreurs.length) erreurs.push("aucun chargement ni simulation trouvé dans le document");
+    return { ok: ajoutees > 0, sequences: ajoutees, erreurs };
+  }
+
+  function viderSimulation() { simIndex = {}; simMeta = null; }
+  function etatSimulation() {
+    return { sequences: Object.keys(simIndex).length, meta: simMeta };
+  }
+  function exporterSimIndex() { return JSON.parse(JSON.stringify(simIndex)); }
+  function importerSimIndex(idx) { if (idx && typeof idx === "object") simIndex = idx; }
+
+  /* ---------- Calcul principal ----------
+     seq = { projetId, sequenceId, poidsLbs, pctCharge } */
+  function calculer(seq, regleId) {
+    const r = regles[regleId || "regle45k"];
+    if (!r) throw new Error("BAReglesChargement: règle inconnue '" + regleId + "'");
+    return r.calculer(seq || {});
+  }
+
+  /* ---------- Comparaison de règles ----------
+     Pour la période de validation en parallèle : retourne,
+     séquence par séquence, l'écart entre deux règles.
+     seqs = tableau de { projetId, sequenceId, poidsLbs, pctCharge } */
+  function comparer(seqs, regleA, regleB) {
+    regleA = regleA || "regle45k";
+    regleB = regleB || "simulateur";
+    const lignes = (seqs || []).map(s => {
+      const a = calculer(s, regleA);
+      const b = calculer(s, regleB);
+      return {
+        projetId: s.projetId, sequenceId: s.sequenceId,
+        [regleA]: a.remTotal, [regleB]: b.remTotal,
+        ecart: b.remTotal - a.remTotal,
+        repliB: b.repli || false
+      };
+    });
+    const simulees = lignes.filter(l => !l.repliB);
+    return {
+      lignes,
+      resume: {
+        sequences: lignes.length,
+        simulees: simulees.length,
+        ecartTotal: simulees.reduce((s, l) => s + l.ecart, 0),
+        ecartAbsolu: simulees.reduce((s, l) => s + Math.abs(l.ecart), 0)
+      }
+    };
+  }
+
+  /* ---------- Utilitaires ---------- */
+  const util = {
+    lbVersKg: lb => (Number(lb) || 0) * KG_PAR_LB,
+    kgVersLb: kg => (Number(kg) || 0) / KG_PAR_LB,
+    LBS_PAR_REMORQUE
+  };
+
+  return {
+    VERSION,
+    regles,
+    listeRegles: () => Object.values(regles).map(r => ({ id: r.id, nom: r.nom, description: r.description })),
+    calculer,
+    comparer,
+    chargerSimulation,
+    viderSimulation,
+    etatSimulation,
+    exporterSimIndex,
+    importerSimIndex,
+    util
+  };
+})();
+
+if (typeof module !== "undefined" && module.exports) module.exports = BAReglesChargement;
+
+</script>
+
+<script>
+const EXCLUDED_OPS = ['ACIER BRUT'];
+let rawRows = [];
+
+/* ═══════════════════════════════════════════════════════════════
+   CONFIGURATION SUPABASE  ← LES 2 SEULES LIGNES À REMPLIR
+   Voir le guide au bas du fichier. Colle ton URL et ta clé
+   « anon public » entre les guillemets. Tant qu'elles sont vides,
+   l'outil fonctionne en mode local (import manuel chaque fois).
+   ═══════════════════════════════════════════════════════════════ */
+const SUPABASE_URL = "https://dzssgzucyigbalaxvqmm.supabase.co/rest/v1/"
+const SUPABASE_ANON_KEY = "sb_publishable_Kq_QI2s7jfYJkY8bfn5SaA_yY9CHe7y"
+const SUPABASE_TABLE = "kpi_transport";
+const SUPABASE_ROW_ID = 1;    // on garde une seule ligne : la semaine courante
+/* ═══════════════════════════════════════════════════════════════ */
+
+let sb = null;
+const sbActif = () => SUPABASE_URL && SUPABASE_ANON_KEY && typeof supabase !== 'undefined';
+
+function initSupabase() {
+  if (!sbActif()) return;
+  try { sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); } catch(e) { sb = null; }
+  const bar = document.getElementById('syncBar');
+  if (bar) bar.style.display = 'flex';
+}
+function setSync(couleur, msg, meta) {
+  const dot = document.getElementById('syncDot');
+  const m = document.getElementById('syncMsg');
+  const mt = document.getElementById('syncMeta');
+  if (dot) dot.style.background = couleur;
+  if (m) m.textContent = msg;
+  if (mt) mt.textContent = meta || '';
+}
+
+/* Envoie les données importées vers Supabase (fait par la
+   personne qui importe — le responsable transport). */
+async function pousserVersSupabase() {
+  if (!sb) return;
+  setSync('#f5a623', 'Envoi vers Supabase…', '');
+  const charge = {
+    importDate: document.getElementById('importDate').value,
+    rows: rawRows,
+    maj: new Date().toISOString()
+  };
+  try {
+    const { error } = await sb.from(SUPABASE_TABLE)
+      .upsert({ id: SUPABASE_ROW_ID, contenu: charge }, { onConflict: 'id' });
+    if (error) throw error;
+    setSync('#2E7D32', 'Données publiées — visibles pour toute l\'équipe cette semaine', 'màj ' + new Date().toLocaleString('fr-CA'));
+  } catch(e) {
+    setSync('#C62828', 'Échec de l\'envoi : ' + (e.message || e), 'les données restent sur ce poste seulement');
+  }
+}
+
+/* Va chercher les données publiées (fait par tous ceux qui
+   ouvrent la page, ex. l'écran Tervene en réunion). */
+async function chargerDepuisSupabase() {
+  if (!sb) return false;
+  setSync('#f5a623', 'Lecture des données publiées…', '');
+  try {
+    const { data, error } = await sb.from(SUPABASE_TABLE)
+      .select('contenu').eq('id', SUPABASE_ROW_ID).maybeSingle();
+    if (error) throw error;
+    if (data && data.contenu && Array.isArray(data.contenu.rows)) {
+      rawRows = data.contenu.rows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
+      if (data.contenu.importDate) document.getElementById('importDate').value = data.contenu.importDate;
+      const quand = data.contenu.maj ? new Date(data.contenu.maj).toLocaleString('fr-CA') : '';
+      setSync('#2E7D32', 'Données publiées chargées', quand ? 'importées le ' + quand : '');
+      render();
+      return true;
+    }
+    setSync('#999', 'Aucune donnée publiée pour l\'instant', 'le responsable transport doit importer le fichier');
+    return false;
+  } catch(e) {
+    setSync('#C62828', 'Lecture impossible : ' + (e.message || e), 'vérifier la configuration Supabase');
+    return false;
+  }
+}
+let lastSummary = '';
+
+const $ = id => document.getElementById(id);
+const todayISO = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); };
+$('importDate').value = todayISO();
+
+function serialToDate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return new Date(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()));
+  const n = Number(v);
+  if (isNaN(n)) return null;
+  const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+function isoToUTC(iso) { const [y,m,d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m-1, d)); }
+function toISO(d) { return d.toISOString().slice(0,10); }
+function fmtDate(d) {
+  if (!d) return '—';
+  const jours = ['dim','lun','mar','mer','jeu','ven','sam'];
+  return jours[d.getUTCDay()] + ' ' + String(d.getUTCDate()).padStart(2,'0') + '/' + String(d.getUTCMonth()+1).padStart(2,'0');
+}
+function fmtDateLong(d) { return d.toLocaleDateString('fr-CA', { weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'UTC' }); }
+
+function easter(y) {
+  const a = y % 19, b = Math.floor(y/100), c = y % 100, d = Math.floor(b/4), e = b % 4,
+        f = Math.floor((b+8)/25), g = Math.floor((b-f+1)/3), h = (19*a+b-d-g+15) % 30,
+        i = Math.floor(c/4), k = c % 4, l = (32+2*e+2*i-h-k) % 7, m = Math.floor((a+11*h+22*l)/451),
+        mo = Math.floor((h+l-7*m+114)/31), da = ((h+l-7*m+114) % 31) + 1;
+  return new Date(Date.UTC(y, mo-1, da));
+}
+function nthMonday(y, month, n) {
+  const first = new Date(Date.UTC(y, month, 1));
+  const offset = (8 - first.getUTCDay()) % 7;
+  return new Date(Date.UTC(y, month, 1 + offset + (n-1)*7));
+}
+function patriotes(y) {
+  let d = new Date(Date.UTC(y, 4, 24));
+  while (d.getUTCDay() !== 1) d = new Date(d.getTime() - 86400000);
+  return d;
+}
+function feriesQC(y) {
+  const p = easter(y);
+  return [
+    new Date(Date.UTC(y,0,1)),
+    new Date(p.getTime() - 2*86400000),
+    patriotes(y),
+    new Date(Date.UTC(y,5,24)),
+    new Date(Date.UTC(y,6,1)),
+    nthMonday(y,8,1),
+    nthMonday(y,9,2),
+    new Date(Date.UTC(y,11,25))
+  ];
+}
+function buildHolidaySet(refDate) {
+  const set = new Set();
+  if ($('chkFeries').checked) {
+    const y = refDate.getUTCFullYear();
+    [y-1, y, y+1].forEach(yy => feriesQC(yy).forEach(d => set.add(toISO(d))));
+  }
+  String($('customHolidays').value || '').split(',').map(s => s.trim()).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s)).forEach(s => set.add(s));
+  return set;
+}
+function busdayCount(from, to, holidays) {
+  if (!from || !to) return null;
+  if (from.getTime() === to.getTime()) return 0;
+  const sign = to > from ? 1 : -1;
+  let a = new Date(sign === 1 ? from : to);
+  const b = sign === 1 ? to : from;
+  let n = 0;
+  while (a < b) {
+    a = new Date(a.getTime() + 86400000);
+    const dow = a.getUTCDay();
+    if (dow !== 0 && dow !== 6 && !holidays.has(toISO(a))) n++;
+  }
+  return n * sign;
+}
+
+function normUsine(o) {
+  if (o == null || String(o).trim() === '') return 'Autres';
+  const s = String(o).toUpperCase();
+  if (s.includes('BGL')) return 'Usine 3';
+  if (s.includes('#2') || s.includes('# 2')) return 'Usine 2';
+  if (s.includes('#1') || s.includes('# 1')) return 'Usine 1';
+  return 'Autres';
+}
+function pctFrom(str, key) {
+  const m = String(str || '').match(new RegExp(key + '\\s*:\\s*([\\d.]+)\\s*%'));
+  return m ? parseFloat(m[1]) : null;
+}
+
+function parseWorkbook(data) {
+  const wb = XLSX.read(data, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  rawRows = json.map(r => {
+    const op = String(r['Opération'] || '').trim();
+    const pctFab = pctFrom(r['Avancement'], 'Fabriqué');
+    let pctChg = pctFrom(r['Avancement'], 'Chargé');
+    const remQ = String(r['Remorques'] || '').trim();
+    const poids = Number(r['Poids']) || 0;
+    if (pctChg == null) pctChg = remQ !== '' ? 100 : 0;
+    return {
+      projet: r['# Projet'], seq: r['# Séq.'], nom: String(r['Nom'] || '').split('  ')[0],
+      op, dateReq: serialToDate(r['Date requise']),
+      usine: normUsine(r['Origine']),
+      pctFab: pctFab == null ? 0 : pctFab, pctChg,
+      poids, transporteur: r['Transporteur'] || '—', statut: r['Statut'] || '',
+      jumelee: poids <= 0,
+      charge: pctChg >= 100 || poids <= 0
+    };
+  }).filter(r => r.dateReq && !EXCLUDED_OPS.includes(r.op.toUpperCase()));
+  try { localStorage.setItem('kpiChargementBA', JSON.stringify({ importDate: $('importDate').value, rows: rawRows })); } catch(e) {}
+  render();
+  if (sb) pousserVersSupabase();
+}
+
+function calcRem(r, regleId) {
+  const res = BAReglesChargement.calculer(
+    { projetId: r.projet, sequenceId: r.seq, poidsLbs: r.poids, pctCharge: Math.min(r.pctChg, 100) },
+    regleId
+  );
+  return res;
+}
+
+function render() {
+  if (!rawRows.length) return;
+  const importDate = isoToUTC($('importDate').value || todayISO());
+  const W = Math.max(1, parseInt($('windowDays').value) || 5);
+  const holidays = buildHolidaySet(importDate);
+  const regleId = $('regleSelect').value || 'regle45k';
+
+  const rows = rawRows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
+  rows.forEach(r => {
+    r.jo = busdayCount(importDate, r.dateReq, holidays);
+    r.inWindow = r.jo < W;
+    r.late = !r.charge && r.inWindow;
+    const res = calcRem(r, regleId);
+    r.remTot = res.remTotal;
+    r.remRest = res.remRestantes;
+    r.remRepli = res.repli;
+  });
+
+  const usines = ['Usine 1','Usine 2','Usine 3','Autres'].filter(u => rows.some(r => r.usine === u));
+  const lateAll = rows.filter(r => r.late);
+  const totLateSeq = lateAll.length;
+  const totLateRem = lateAll.reduce((s,r) => s + r.remRest, 0);
+  const ok = totLateSeq === 0;
+
+  saveHistory($('importDate').value, rows, usines);
+
+  let summaryLines = ['KPI Chargement Chantier — ' + fmtDateLong(importDate), ''];
+
+  let html = `<div class="banner ${ok ? 'ok' : 'bad'}">
+    <div class="big">${ok ? '✔ 0 séquence en retard' : '✖ ' + totLateSeq + ' séquence(s) en retard'}</div>
+    <div class="desc">${ok ? 'Tout le matériel requis dans les ' + W + ' prochains jours ouvrables est chargé.' : totLateRem + ' remorque(s) à charger pour du matériel requis dans moins de ' + W + ' jours ouvrables.'}</div>
+    <div class="meta">Importé le ${fmtDateLong(importDate)}<br>${rows.length} lignes analysées (Acier Brut exclu)<br><button class="btn-copy" id="btnCopy" style="margin-top:6px">Copier le résumé du matin</button></div>
+  </div>`;
+
+  html += renderTrend();
+  html += renderRegleBanner(rows, regleId);
+
+  usines.forEach(u => {
+    const res = renderUsine(rows.filter(r => r.usine === u), u, W);
+    html += res.html;
+    summaryLines.push(res.summary);
+  });
+
+  summaryLines.push('', 'Fenêtre : ' + W + ' jours ouvrables' + ($('chkFeries').checked ? ' (fériés QC exclus)' : '') + ' — Objectif : 0 séquence en retard');
+  lastSummary = summaryLines.join('\n');
+
+  const regleNote = regleId === 'simulateur'
+    ? 'Règle remorques : simulateur (.fabT), nombre réel de remorques. Repli sur 45 000 lbs pour toute séquence non simulée. Chargement partiel pondéré par le % Chargé.'
+    : 'Règle remorques : 45 000 lbs par chargement, arrondi à l\'unité supérieure (ex. 110 000 lbs = 2,44 → 3 remorques). Chargement partiel pondéré par le % Chargé de l\'ERP.';
+  html += `<div class="footnote">
+    ${regleNote}<br>
+    Séquence «chargée» = Avancement Chargé : 100 % OU poids à 0 (séquence jumelée à une autre du même projet).<br>
+    BGL = Usine 3. «Autres» = origines hors usines BA. Jours ouvrables = lundi au vendredi${$('chkFeries').checked ? ', fériés QC exclus' : ''}, à partir de la date d'importation.
+  </div>`;
+
+  $('results').innerHTML = html;
+  $('dropzone').style.display = 'none';
+  const bc = $('btnCopy');
+  if (bc) bc.onclick = copySummary;
+  const cl = $('btnClearHist');
+  if (cl) cl.onclick = () => { localStorage.removeItem('kpiChargementBA_hist'); render(); };
+}
+
+function renderUsine(rs, name, W) {
+  if (!rs.length) return { html: '', summary: '' };
+  const late = rs.filter(r => r.late).sort((a,b) => a.dateReq - b.dateReq);
+  const lateRem = late.reduce((s,r) => s + r.remRest, 0);
+  const notLoaded = rs.filter(r => !r.charge);
+  const ready = rs.filter(r => !r.charge && r.pctFab >= 99);
+  const readyRem = ready.reduce((s,r) => s + r.remRest, 0);
+  const loadedRem = rs.reduce((s,r) => s + (r.remTot - r.remRest), 0);
+  const loadedPoids = rs.reduce((s,r) => s + r.poids * Math.min(r.pctChg,100)/100, 0);
+  const fabRisk = rs.filter(r => !r.charge && r.pctFab < 99 && r.jo < W * 2).sort((a,b) => a.dateReq - b.dateReq);
+
+  let couvTxt, couvDet, couvSum;
+  if (!notLoaded.length) { couvTxt = 'Complet'; couvDet = 'tout l\u2019horizon est chargé'; couvSum = 'complet'; }
+  else {
+    const first = notLoaded.reduce((m,r) => r.dateReq < m.dateReq ? r : m);
+    couvTxt = first.jo <= 0 ? '0 jour' : first.jo + ' j. ouvr.';
+    couvDet = 'prochain à charger : requis ' + fmtDate(first.dateReq);
+    couvSum = couvTxt;
+  }
+
+  const isOk = late.length === 0;
+  let summary = name + ' : ' + (isOk ? 'à jour (0 retard)' : late.length + ' séq. en retard (' + lateRem + ' rem) — ' +
+    late.map(r => r.projet + '-' + (r.seq || '?') + ' (' + fmtDate(r.dateReq) + ')').join(', ')) +
+    ' | avance : ' + couvSum;
+
+  let html = `<div class="usine"><div class="usine-head"><h2>${name}</h2><span class="pill ${isOk ? 'ok' : 'bad'}">${isOk ? 'À jour' : late.length + ' séq. en retard'}</span></div><div class="usine-body">`;
+
+  html += `<div class="kpis">
+    <div class="kpi k-retard ${isOk ? 'ok' : 'bad'}"><div class="lbl">Retard (fenêtre ${W} j.o.)</div><div class="val">${late.length} séq.</div><div class="det">${lateRem} remorque(s) à charger — objectif : 0</div></div>
+    <div class="kpi k-couv"><div class="lbl">Avance de chargement</div><div class="val">${couvTxt}</div><div class="det">${couvDet}</div></div>
+    <div class="kpi k-pret"><div class="lbl">Prêt à charger</div><div class="val">${readyRem} rem</div><div class="det">${ready.length} séq. fabriquées ≥ 99 %, non chargées</div></div>
+    <div class="kpi k-fab"><div class="lbl">Chargé (horizon)</div><div class="val">${loadedRem} rem</div><div class="det">${(loadedPoids/1000).toFixed(0)} k lbs, incluant partiels</div></div>
+  </div>`;
+
+  const byDate = {};
+  rs.forEach(r => {
+    const k = toISO(r.dateReq);
+    if (!byDate[k]) byDate[k] = { date: r.dateReq, inWindow: r.inWindow, charge: 0, pret: 0, retard: 0, pasfab: 0 };
+    byDate[k].charge += r.remTot - r.remRest;
+    if (!r.charge) {
+      if (r.late) byDate[k].retard += r.remRest;
+      else if (r.pctFab >= 99) byDate[k].pret += r.remRest;
+      else byDate[k].pasfab += r.remRest;
+    }
+  });
+  const dates = Object.values(byDate).sort((a,b) => a.date - b.date);
+  const maxTot = Math.max(...dates.map(d => d.charge + d.pret + d.retard + d.pasfab), 1);
+  html += `<div class="tl-wrap"><div class="tl-title">Remorques par date requise <small style="font-weight:400;color:var(--gray)">(règle 45 000 lbs — cadre orange = fenêtre ${W} j. ouvrables)</small></div><div class="tl">`;
+  dates.forEach(d => {
+    const tot = d.charge + d.pret + d.retard + d.pasfab;
+    const h = v => (v / maxTot * 100).toFixed(1) + '%';
+    html += `<div class="tl-day"><div class="tl-bar ${d.inWindow ? 'window' : ''}" title="${fmtDate(d.date)} — ${tot} rem">
+      <div class="seg charge" style="height:${h(d.charge)}"></div>
+      <div class="seg retard-seg" style="height:${h(d.retard)}"></div>
+      <div class="seg pret" style="height:${h(d.pret)}"></div>
+      <div class="seg pasfab" style="height:${h(d.pasfab)}"></div>
+    </div><div class="tl-rem">${tot}</div><div class="tl-lbl">${fmtDate(d.date)}</div></div>`;
+  });
+  html += `</div><div class="legend">
+    <span><span class="sw" style="background:#9AA5B1"></span>Chargé</span>
+    <span><span class="sw" style="background:var(--red)"></span>En retard (non chargé, fenêtre)</span>
+    <span><span class="sw" style="background:var(--blue)"></span>Prêt à charger</span>
+    <span><span class="sw" style="background:var(--orange)"></span>Pas fabriqué (&lt; 99 %)</span>
+  </div></div>`;
+
+  if (late.length) {
+    html += `<div class="sec-title" style="color:var(--red)">⚠ Séquences en retard <small>— non chargées, requises dans moins de ${W} j. ouvrables</small></div>`;
+    html += tableFor(late, true);
+  } else {
+    html += `<div class="empty-note">✔ Aucune séquence en retard dans la fenêtre de ${W} jours ouvrables.</div>`;
+  }
+  if (fabRisk.length) {
+    html += `<div class="sec-title" style="color:var(--orange-dark)">Vigie fabrication <small>— fab &lt; 99 %, requis dans moins de ${W*2} j. ouvrables (risque de retard à venir)</small></div>`;
+    html += tableFor(fabRisk, false);
+  }
+  html += `</div></div>`;
+  return { html, summary };
+}
+
+function tableFor(rows, isLate) {
+  let h = `<table><thead><tr><th>Projet–Séq.</th><th>Chantier</th><th>Opération</th><th>Date requise</th><th>J. ouvr.</th><th>Fab %</th><th>Chargé %</th><th class="num">Poids (lbs)</th><th class="num">Rem rest.</th><th>Transporteur</th></tr></thead><tbody>`;
+  rows.forEach(r => {
+    const joTag = r.jo <= 0 ? `<span class="tag r">${r.jo === 0 ? 'aujourd\u2019hui' : 'passé (' + r.jo + ')'}</span>` : (r.inWindow ? `<span class="tag ${isLate ? 'r' : 'o'}">${r.jo} j</span>` : `<span class="tag g">${r.jo} j</span>`);
+    const fabTag = r.pctFab >= 99 ? `<span class="tag g">${r.pctFab.toFixed(0)} %</span>` : `<span class="tag o">${r.pctFab.toFixed(0)} %</span>`;
+    const chgTag = r.pctChg > 0 ? `<span class="tag b">${Math.min(r.pctChg,100).toFixed(0)} %</span>` : `<span class="tag r">0 %</span>`;
+    h += `<tr class="${isLate ? 'late' : ''}"><td><strong>${r.projet}</strong>–${r.seq || '—'}</td><td>${r.nom}</td><td>${r.op}</td><td>${fmtDate(r.dateReq)}</td><td>${joTag}</td><td>${fabTag}</td><td>${chgTag}</td><td class="num">${r.poids.toLocaleString('fr-CA')}</td><td class="num">${r.remRest}</td><td>${r.transporteur}</td></tr>`;
+  });
+  return h + `</tbody></table>`;
+}
+
+function saveHistory(dateISO, rows, usines) {
+  try {
+    const hist = JSON.parse(localStorage.getItem('kpiChargementBA_hist') || '{}');
+    const entry = { total: { seq: 0, rem: 0 }, usines: {} };
+    usines.forEach(u => {
+      const late = rows.filter(r => r.usine === u && r.late);
+      const rem = late.reduce((s,r) => s + r.remRest, 0);
+      entry.usines[u] = { seq: late.length, rem };
+      entry.total.seq += late.length;
+      entry.total.rem += rem;
+    });
+    hist[dateISO] = entry;
+    localStorage.setItem('kpiChargementBA_hist', JSON.stringify(hist));
+  } catch(e) {}
+}
+
+function renderRegleBanner(rows, regleId) {
+  const simEtat = BAReglesChargement.etatSimulation();
+  const simOn = simEtat.sequences > 0;
+  let html = `<div class="regle-banner">
+    <div class="rb-left"><span class="rb-badge ${regleId === 'simulateur' ? 'sim' : ''}">${regleId === 'simulateur' ? 'Simulateur (.fabT)' : 'Règle 45 000 lbs'}</span>
+    <span class="rb-txt">règle de mesure active</span></div>`;
+
+  const seqs = rows.map(r => ({ projetId: r.projet, sequenceId: r.seq, poidsLbs: r.poids, pctCharge: Math.min(r.pctChg, 100) }));
+  if (simOn) {
+    const cmp = BAReglesChargement.comparer(seqs, 'regle45k', 'simulateur');
+    const rz = cmp.resume;
+    const signe = rz.ecartTotal > 0 ? '+' : '';
+    html += `<div class="rb-right">Simulation : <strong>${simEtat.sequences}</strong> séquence(s) importée(s) · Écart 45k → sim sur ${rz.simulees} séq. simulées : <strong>${signe}${rz.ecartTotal}</strong> remorque(s) net (${rz.ecartAbsolu} en absolu)</div>`;
+  } else if (regleId === 'simulateur') {
+    html += `<div class="rb-right rb-warn">Aucune simulation importée — toutes les séquences retombent sur la règle 45 000 lbs. Importe un JSON du simulateur pour activer le calcul réel.</div>`;
+  } else {
+    html += `<div class="rb-right">Bascule vers «Simulateur» dans l'entête, puis importe un JSON du simulateur pour comparer les deux règles en parallèle.</div>`;
+  }
+  return html + `</div>`;
+}
+
+function renderTrend() {
+  let hist;
+  try { hist = JSON.parse(localStorage.getItem('kpiChargementBA_hist') || '{}'); } catch(e) { return ''; }
+  const keys = Object.keys(hist).sort();
+  if (keys.length < 2) return '';
+  const recent = keys.slice(-20);
+  const maxV = Math.max(...recent.map(k => hist[k].total.seq), 1);
+  let h = `<div class="trend"><button class="btn-clear" id="btnClearHist">effacer l'historique</button><h3>Tendance — séquences en retard par jour d'importation <small>(${recent.length} derniers imports — le but : rester au vert)</small></h3><div class="trend-bars">`;
+  recent.forEach(k => {
+    const v = hist[k].total.seq;
+    const d = isoToUTC(k);
+    const tip = Object.entries(hist[k].usines).filter(([,x]) => x.seq > 0).map(([u,x]) => u + ': ' + x.seq + ' séq.').join(', ') || 'à jour';
+    h += `<div class="trend-day" title="${fmtDate(d)} — ${tip}"><div class="trend-val">${v}</div><div class="trend-bar ${v === 0 ? 'zero' : ''}" style="height:${Math.max(4, v/maxV*70)}px"></div><div class="trend-lbl">${fmtDate(d)}</div></div>`;
+  });
+  return h + `</div></div>`;
+}
+
+function copySummary() {
+  const done = () => { const b = $('btnCopy'); if (b) { b.textContent = '✔ Copié!'; setTimeout(() => b.textContent = 'Copier le résumé du matin', 2000); } };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(lastSummary).then(done).catch(() => fallbackCopy(done));
+  } else fallbackCopy(done);
+}
+function fallbackCopy(done) {
+  const ta = document.createElement('textarea');
+  ta.value = lastSummary;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); done(); } catch(e) {}
+  document.body.removeChild(ta);
+}
+
+$('btnImport').onclick = () => $('fileInput').click();
+$('dropzone').onclick = () => $('fileInput').click();
+$('fileInput').onchange = e => { const f = e.target.files[0]; if (f) readFile(f); };
+function readFile(f) {
+  const rd = new FileReader();
+  rd.onload = ev => parseWorkbook(new Uint8Array(ev.target.result));
+  rd.readAsArrayBuffer(f);
+}
+['dragover','dragenter'].forEach(evt => $('dropzone').addEventListener(evt, e => { e.preventDefault(); $('dropzone').classList.add('drag'); }));
+['dragleave','drop'].forEach(evt => $('dropzone').addEventListener(evt, e => { e.preventDefault(); $('dropzone').classList.remove('drag'); }));
+$('dropzone').addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) readFile(f); });
+$('importDate').onchange = render;
+$('windowDays').onchange = render;
+$('chkFeries').onchange = render;
+$('customHolidays').onchange = () => { try { localStorage.setItem('kpiChargementBA_custom', $('customHolidays').value); } catch(e) {} render(); };
+
+function syncSimUI() {
+  const regleId = $('regleSelect').value;
+  $('simControls').style.display = regleId === 'simulateur' ? 'inline' : 'none';
+  const etat = BAReglesChargement.etatSimulation();
+  const st = $('simStatus');
+  if (st) { st.textContent = etat.sequences > 0 ? etat.sequences + ' séquence(s) importée(s)' : 'aucune importée'; st.style.color = etat.sequences > 0 ? '#8FE0B0' : '#fff'; }
+}
+$('regleSelect').onchange = () => { try { localStorage.setItem('kpiChargementBA_regle', $('regleSelect').value); } catch(e) {} syncSimUI(); render(); };
+$('btnSim').onclick = () => $('simFile').click();
+$('simFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = ev => {
+    try {
+      const doc = JSON.parse(ev.target.result);
+      const res = BAReglesChargement.chargerSimulation(doc);
+      if (res.ok) {
+        try { localStorage.setItem('kpiChargementBA_sim', JSON.stringify(BAReglesChargement.exporterSimIndex())); } catch(e) {}
+        syncSimUI(); render();
+      } else {
+        alert('Import simulation échoué : ' + (res.erreurs[0] || 'format non reconnu') + '\n\nAttendu : un document BA-Schema avec chargements[] (projetId, sequenceId, remorqueId) ou un export { simulations: [{ projet, sequence, nbRemorques }] }.');
+      }
+    } catch(err) { alert('Fichier JSON invalide : ' + err.message); }
+  };
+  rd.readAsText(f);
+  e.target.value = '';
+};
+$('btnSimClear').onclick = () => {
+  BAReglesChargement.viderSimulation();
+  try { localStorage.removeItem('kpiChargementBA_sim'); } catch(e) {}
+  syncSimUI(); render();
+};
+
+try {
+  const custom = localStorage.getItem('kpiChargementBA_custom');
+  if (custom) $('customHolidays').value = custom;
+  const savedRegle = localStorage.getItem('kpiChargementBA_regle');
+  if (savedRegle) $('regleSelect').value = savedRegle;
+  const savedSim = localStorage.getItem('kpiChargementBA_sim');
+  if (savedSim) { try { BAReglesChargement.importerSimIndex(JSON.parse(savedSim)); } catch(e) {} }
+  syncSimUI();
+
+  // 1) Afficher tout de suite ce qu'on a en local (rapide, hors-ligne)
+  const saved = JSON.parse(localStorage.getItem('kpiChargementBA') || 'null');
+  if (saved && saved.rows && saved.rows.length) {
+    rawRows = saved.rows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
+    if (saved.importDate) $('importDate').value = saved.importDate;
+    render();
+  }
+
+  // 2) Si Supabase est configuré, aller chercher la version publiée
+  //    (écrase le local si elle existe — c'est la source de vérité partagée)
+  initSupabase();
+  if (sb) chargerDepuisSupabase();
+} catch(e) {}
+</script>
+</body>
+</html>
