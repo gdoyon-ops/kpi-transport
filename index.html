@@ -15,7 +15,9 @@
     --orange: #D6001C; --orange-dark: #A50016;                      /* rouge Beauce Atlas */
     --green: #2E7D32; --green-pale: #E4F0E5;                        /* statut « à jour » */
     --red: #C62828; --red-pale: #FBEAEA;                           /* statut « retard » */
-    --blue: #B0000F; --blue-pale: #F7E7E9;                         /* accent secondaire (rouge sombre) */
+    --blue: #2E3A46; --blue-pale: #E9EBEE;                         /* « prêt à charger » : ardoise foncée */
+    --amber: #E8A33D; --amber-pale: #FDF1E3;                       /* « pas fabriqué » : ambre */
+    --silver: #B8BEC6;                                             /* « chargé » : gris clair */
     --gray: #5E5E5E; --gray-pale: #F2F2F2; --border: #D8D2D2;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -92,8 +94,8 @@
   .kpi.k-retard.bad { background: var(--red-pale); } .kpi.k-retard.bad .lbl, .kpi.k-retard.bad .val { color: var(--red); } .kpi.k-retard.bad .det { color: #8f4444; }
   .kpi.k-retard.ok { background: var(--green-pale); } .kpi.k-retard.ok .lbl, .kpi.k-retard.ok .val { color: var(--green); } .kpi.k-retard.ok .det { color: #4a6d4c; }
   .kpi.k-couv { background: var(--navy-pale); } .kpi.k-couv .lbl, .kpi.k-couv .val { color: var(--navy); } .kpi.k-couv .det { color: #6E6868; }
-  .kpi.k-pret { background: var(--blue-pale); } .kpi.k-pret .lbl, .kpi.k-pret .val { color: var(--blue); } .kpi.k-pret .det { color: #7A5252; }
-  .kpi.k-fab { background: #FDF1E3; } .kpi.k-fab .lbl, .kpi.k-fab .val { color: var(--orange-dark); } .kpi.k-fab .det { color: #a06a35; }
+  .kpi.k-pret { background: var(--blue-pale); } .kpi.k-pret .lbl, .kpi.k-pret .val { color: var(--blue); } .kpi.k-pret .det { color: #5A6672; }
+  .kpi.k-fab { background: #F1F2F4; } .kpi.k-fab .lbl, .kpi.k-fab .val { color: #5E6672; } .kpi.k-fab .det { color: #7A828C; }
 
   .tl-wrap { margin: 6px 0 16px; }
   .tl-title { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
@@ -102,10 +104,10 @@
   .tl-bar { display: flex; flex-direction: column-reverse; height: 110px; border-radius: 4px 4px 0 0; overflow: hidden; background: var(--gray-pale); }
   .tl-bar.window { outline: 2px solid var(--orange); outline-offset: -2px; }
   .seg { width: 100%; }
-  .seg.charge { background: #9AA5B1; }
+  .seg.charge { background: var(--silver); }
   .seg.pret { background: var(--blue); }
-  .seg.retard-seg { background: var(--red); }
-  .seg.pasfab { background: var(--orange); }
+  .seg.retard-seg { background: #D6001C; }
+  .seg.pasfab { background: var(--amber); }
   .tl-lbl { font-size: 11px; color: var(--gray); margin-top: 4px; line-height: 1.2; }
   .tl-rem { font-size: 11px; font-weight: 700; color: var(--navy); }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #374151; margin-top: 10px; }
@@ -146,12 +148,16 @@
   </div>
   <div class="header-controls">
     <div>
-      <label for="importDate">Date d'importation</label>
+      <label for="importDate">Date de référence</label>
       <input type="date" id="importDate">
     </div>
     <div>
       <label for="windowDays">Fenêtre (j. ouvrables)</label>
       <input type="number" id="windowDays" min="1" max="15" value="5">
+    </div>
+    <div>
+      <label for="transitDays">Transit (j. ouvrables)</label>
+      <input type="number" id="transitDays" min="0" max="10" value="1">
     </div>
     <div>
       <label for="regleSelect">Règle de mesure</label>
@@ -166,6 +172,12 @@
 </header>
 
 <div class="settings">
+  <label>Opérations :
+    <select id="opFilter" style="font-family:Calibri,sans-serif;font-size:13px;padding:3px 6px;border-radius:5px;border:1px solid #4A2A2A;background:var(--navy);color:#fff;">
+      <option value="chantier">Livraison Chantier seulement</option>
+      <option value="toutes">Toutes (galva, primer, pliage inclus)</option>
+    </select>
+  </label>
   <label><input type="checkbox" id="chkFeries" checked> Exclure les fériés du Québec</label>
   <span>
     Fermetures usine additionnelles :
@@ -423,7 +435,12 @@ if (typeof module !== "undefined" && module.exports) module.exports = BAReglesCh
 
 <script>
 const EXCLUDED_OPS = ['ACIER BRUT'];
+/* Sous ce poids restant, une sequence partiellement chargee est
+   consideree comme un simple residu a finaliser (piece qui sera
+   jumelee ou complement mineur) : pas un retard, pas une remorque. */
+const SEUIL_RESIDU_LBS = 5000;
 let rawRows = [];
+let dateImportData = null;   /* date reelle du dernier import (metadonnee) */
 
 /* ═══════════════════════════════════════════════════════════════
    CONFIGURATION SUPABASE  ← LES 2 SEULES LIGNES À REMPLIR
@@ -432,7 +449,7 @@ let rawRows = [];
    l'outil fonctionne en mode local (import manuel chaque fois).
    ═══════════════════════════════════════════════════════════════ */
 const SUPABASE_URL = "https://dzssgzucyigbalaxvqmm.supabase.co"
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR6c3NnenVjeWlnYmFsYXh2cW1tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxNzEyOTMsImV4cCI6MjEwMDc0NzI5M30.kEPE_JNzasQK08RNKzfAlgUIJPpGxkYHJ6B3npnVUyQ"
+const SUPABASE_ANON_KEY = "sb_publishable_Kq_QI2s7jfYJkY8bfn5SaA_yY9CHe7y"
 const SUPABASE_TABLE = "kpi_transport";
 const SUPABASE_ROW_ID = 1;    // on garde une seule ligne : la semaine courante
 /* ═══════════════════════════════════════════════════════════════ */
@@ -461,7 +478,7 @@ async function pousserVersSupabase() {
   if (!sb) return;
   setSync('#f5a623', 'Envoi vers Supabase…', '');
   const charge = {
-    importDate: document.getElementById('importDate').value,
+    dateImport: dateImportData || todayISO(),
     rows: rawRows,
     maj: new Date().toISOString()
   };
@@ -486,7 +503,7 @@ async function chargerDepuisSupabase() {
     if (error) throw error;
     if (data && data.contenu && Array.isArray(data.contenu.rows)) {
       rawRows = data.contenu.rows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
-      if (data.contenu.importDate) document.getElementById('importDate').value = data.contenu.importDate;
+      dateImportData = data.contenu.dateImport || data.contenu.importDate || null;
       const quand = data.contenu.maj ? new Date(data.contenu.maj).toLocaleString('fr-CA') : '';
       setSync('#2E7D32', 'Données publiées chargées', quand ? 'importées le ' + quand : '');
       render();
@@ -576,6 +593,22 @@ function busdayCount(from, to, holidays) {
   return n * sign;
 }
 
+/* Recule d'une date de N jours ouvrables (fériés exclus).
+   Sert à convertir une date de livraison au chantier en date
+   limite de chargement à l'usine : les chantiers américains
+   exigent souvent un départ la veille ou plus. */
+function busdaySubtract(date, n, holidays) {
+  if (!date) return null;
+  let d = new Date(date);
+  let reste = Math.max(0, n);
+  while (reste > 0) {
+    d = new Date(d.getTime() - 86400000);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6 && !holidays.has(toISO(d))) reste--;
+  }
+  return d;
+}
+
 function normUsine(o) {
   if (o == null || String(o).trim() === '') return 'Autres';
   const s = String(o).toUpperCase();
@@ -610,7 +643,9 @@ function parseWorkbook(data) {
       charge: pctChg >= 100 || poids <= 0
     };
   }).filter(r => r.dateReq && !EXCLUDED_OPS.includes(r.op.toUpperCase()));
-  try { localStorage.setItem('kpiChargementBA', JSON.stringify({ importDate: $('importDate').value, rows: rawRows })); } catch(e) {}
+  dateImportData = todayISO();
+  $('importDate').value = dateImportData;
+  try { localStorage.setItem('kpiChargementBA', JSON.stringify({ dateImport: dateImportData, rows: rawRows })); } catch(e) {}
   render();
   if (sb) pousserVersSupabase();
 }
@@ -628,16 +663,25 @@ function render() {
   const importDate = isoToUTC($('importDate').value || todayISO());
   const W = Math.max(1, parseInt($('windowDays').value) || 5);
   const holidays = buildHolidaySet(importDate);
+  const T = Math.max(0, parseInt($('transitDays').value) || 0);
   const regleId = $('regleSelect').value || 'regle45k';
 
-  const rows = rawRows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
+  const filtreOp = $('opFilter').value;
+  let rows = rawRows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
+  const totalAvantFiltre = rows.length;
+  if (filtreOp === 'chantier') rows = rows.filter(r => String(r.op).toUpperCase().includes('LIVRAISON CHANTIER'));
   rows.forEach(r => {
-    r.jo = busdayCount(importDate, r.dateReq, holidays);
+    r.dateLimite = busdaySubtract(r.dateReq, T, holidays);
+    r.jo = busdayCount(importDate, r.dateLimite, holidays);
     r.inWindow = r.jo < W;
-    r.late = !r.charge && r.inWindow;
     const res = calcRem(r, regleId);
     r.remTot = res.remTotal;
     r.remRest = res.remRestantes;
+    r.poidsRest = r.charge ? 0 : Math.round(r.poids * (1 - Math.min(r.pctChg,100)/100));
+    r.residu = !r.charge && r.pctChg > 0 && r.poidsRest > 0 && r.poidsRest < SEUIL_RESIDU_LBS;
+    if (r.residu) r.remRest = 0;
+    r.late = !r.charge && !r.residu && r.inWindow;
+    r.critique = r.late && r.jo <= 0;
     r.remRepli = res.repli;
   });
 
@@ -649,24 +693,34 @@ function render() {
 
   saveHistory($('importDate').value, rows, usines);
 
+  let fraicheurTxt = 'Données importées : date inconnue';
+  let donneesPerimees = false;
+  if (dateImportData) {
+    const dImp = isoToUTC(dateImportData);
+    const ecart = busdayCount(dImp, importDate, holidays);
+    donneesPerimees = ecart >= 1;
+    fraicheurTxt = 'Données importées le ' + fmtDateLong(dImp) +
+      (donneesPerimees ? ' <strong style="color:#C62828">\u26a0 ' + ecart + ' j. ouvrable(s) de retard \u2014 \u00e0 r\u00e9importer</strong>' : ' <span style="color:#2E7D32">\u2713 \u00e0 jour</span>');
+  }
+
   let summaryLines = ['KPI Chargement Chantier — ' + fmtDateLong(importDate), ''];
 
   let html = `<div class="banner ${ok ? 'ok' : 'bad'}">
     <div class="big">${ok ? '✔ 0 séquence en retard' : '✖ ' + totLateSeq + ' séquence(s) en retard'}</div>
     <div class="desc">${ok ? 'Tout le matériel requis dans les ' + W + ' prochains jours ouvrables est chargé.' : totLateRem + ' remorque(s) à charger pour du matériel requis dans moins de ' + W + ' jours ouvrables.'}</div>
-    <div class="meta">Importé le ${fmtDateLong(importDate)}<br>${rows.length} lignes analysées (Acier Brut exclu)<br><button class="btn-copy" id="btnCopy" style="margin-top:6px">Copier le résumé du matin</button></div>
+    <div class="meta">${fraicheurTxt}<br>Calcul au ${fmtDateLong(importDate)}<br>${rows.length} ligne(s) analysée(s)${filtreOp === 'chantier' ? ' \u2014 Livraison Chantier seulement (' + (totalAvantFiltre - rows.length) + ' autre(s) op. exclue(s))' : ' \u2014 toutes opérations'}<br><button class="btn-copy" id="btnCopy" style="margin-top:6px">Copier le résumé du matin</button></div>
   </div>`;
 
   html += renderTrend();
   html += renderRegleBanner(rows, regleId);
 
   usines.forEach(u => {
-    const res = renderUsine(rows.filter(r => r.usine === u), u, W);
+    const res = renderUsine(rows.filter(r => r.usine === u), u, W, T);
     html += res.html;
     summaryLines.push(res.summary);
   });
 
-  summaryLines.push('', 'Fenêtre : ' + W + ' jours ouvrables' + ($('chkFeries').checked ? ' (fériés QC exclus)' : '') + ' — Objectif : 0 séquence en retard');
+  summaryLines.push('', 'Fenêtre : ' + W + ' jours ouvrables' + ($('chkFeries').checked ? ' (fériés QC exclus)' : '') + ' — Transit : ' + T + ' j. ouvrable(s) avant livraison — Objectif : 0 séquence en retard');
   lastSummary = summaryLines.join('\n');
 
   const regleNote = regleId === 'simulateur'
@@ -674,7 +728,9 @@ function render() {
     : 'Règle remorques : 45 000 lbs par chargement, arrondi à l\'unité supérieure (ex. 110 000 lbs = 2,44 → 3 remorques). Chargement partiel pondéré par le % Chargé de l\'ERP.';
   html += `<div class="footnote">
     ${regleNote}<br>
-    Séquence «chargée» = Avancement Chargé : 100 % OU poids à 0 (séquence jumelée à une autre du même projet).<br>
+    Séquence «chargée» = Avancement Chargé : 100 % OU poids à 0 (séquence jumelée à une autre du même projet). Les pourcentages sont affichés sans arrondi vers le haut : une séquence à 99,6 % s'affiche 99,6 %, jamais 100 %.<br>
+    «Résidu à finaliser» = séquence partiellement chargée dont il reste moins de ${SEUIL_RESIDU_LBS.toLocaleString('fr-CA')} lbs. Ces résidus ne sont pas comptés comme retard ni comme remorque (l'objectif 0 reste atteignable), mais sont listés pour ne pas être oubliés.<br>
+    Date limite de chargement = date requise au chantier moins ${T} jour(s) ouvrable(s) de transit. Tout le KPI (retard, avance, fenêtre) se calcule sur cette date limite, car un chargement doit quitter l'usine avant la date de livraison — la majorité des chantiers étant aux É.-U.<br>
     BGL = Usine 3. «Autres» = origines hors usines BA. Jours ouvrables = lundi au vendredi${$('chkFeries').checked ? ', fériés QC exclus' : ''}, à partir de la date d'importation.
   </div>`;
 
@@ -686,7 +742,7 @@ function render() {
   if (cl) cl.onclick = () => { localStorage.removeItem('kpiChargementBA_hist'); render(); };
 }
 
-function renderUsine(rs, name, W) {
+function renderUsine(rs, name, W, T) {
   if (!rs.length) return { html: '', summary: '' };
   const late = rs.filter(r => r.late).sort((a,b) => a.dateReq - b.dateReq);
   const lateRem = late.reduce((s,r) => s + r.remRest, 0);
@@ -696,13 +752,14 @@ function renderUsine(rs, name, W) {
   const loadedRem = rs.reduce((s,r) => s + (r.remTot - r.remRest), 0);
   const loadedPoids = rs.reduce((s,r) => s + r.poids * Math.min(r.pctChg,100)/100, 0);
   const fabRisk = rs.filter(r => !r.charge && r.pctFab < 99 && r.jo < W * 2).sort((a,b) => a.dateReq - b.dateReq);
+  const residus = rs.filter(r => r.residu).sort((a,b) => a.dateLimite - b.dateLimite);
 
   let couvTxt, couvDet, couvSum;
   if (!notLoaded.length) { couvTxt = 'Complet'; couvDet = 'tout l\u2019horizon est chargé'; couvSum = 'complet'; }
   else {
-    const first = notLoaded.reduce((m,r) => r.dateReq < m.dateReq ? r : m);
+    const first = notLoaded.reduce((m,r) => r.dateLimite < m.dateLimite ? r : m);
     couvTxt = first.jo <= 0 ? '0 jour' : first.jo + ' j. ouvr.';
-    couvDet = 'prochain à charger : requis ' + fmtDate(first.dateReq);
+    couvDet = 'prochain : limite ' + fmtDate(first.dateLimite) + ' (livraison ' + fmtDate(first.dateReq) + ')';
     couvSum = couvTxt;
   }
 
@@ -722,8 +779,8 @@ function renderUsine(rs, name, W) {
 
   const byDate = {};
   rs.forEach(r => {
-    const k = toISO(r.dateReq);
-    if (!byDate[k]) byDate[k] = { date: r.dateReq, inWindow: r.inWindow, charge: 0, pret: 0, retard: 0, pasfab: 0 };
+    const k = toISO(r.dateLimite);
+    if (!byDate[k]) byDate[k] = { date: r.dateLimite, dateReq: r.dateReq, inWindow: r.inWindow, charge: 0, pret: 0, retard: 0, pasfab: 0 };
     byDate[k].charge += r.remTot - r.remRest;
     if (!r.charge) {
       if (r.late) byDate[k].retard += r.remRest;
@@ -733,11 +790,11 @@ function renderUsine(rs, name, W) {
   });
   const dates = Object.values(byDate).sort((a,b) => a.date - b.date);
   const maxTot = Math.max(...dates.map(d => d.charge + d.pret + d.retard + d.pasfab), 1);
-  html += `<div class="tl-wrap"><div class="tl-title">Remorques par date requise <small style="font-weight:400;color:var(--gray)">(règle 45 000 lbs — cadre orange = fenêtre ${W} j. ouvrables)</small></div><div class="tl">`;
+  html += `<div class="tl-wrap"><div class="tl-title">Remorques par date limite de chargement <small style="font-weight:400;color:var(--gray)">(date requise au chantier ${T > 0 ? '\u2212 ' + T + ' j. ouvrable(s) de transit' : 'sans transit'} — cadre rouge = fenêtre ${W} j. ouvrables)</small></div><div class="tl">`;
   dates.forEach(d => {
     const tot = d.charge + d.pret + d.retard + d.pasfab;
     const h = v => (v / maxTot * 100).toFixed(1) + '%';
-    html += `<div class="tl-day"><div class="tl-bar ${d.inWindow ? 'window' : ''}" title="${fmtDate(d.date)} — ${tot} rem">
+    html += `<div class="tl-day"><div class="tl-bar ${d.inWindow ? 'window' : ''}" title="Charger le ${fmtDate(d.date)} — livraison ${fmtDate(d.dateReq)} — ${tot} rem">
       <div class="seg charge" style="height:${h(d.charge)}"></div>
       <div class="seg retard-seg" style="height:${h(d.retard)}"></div>
       <div class="seg pret" style="height:${h(d.pret)}"></div>
@@ -745,10 +802,10 @@ function renderUsine(rs, name, W) {
     </div><div class="tl-rem">${tot}</div><div class="tl-lbl">${fmtDate(d.date)}</div></div>`;
   });
   html += `</div><div class="legend">
-    <span><span class="sw" style="background:#9AA5B1"></span>Chargé</span>
-    <span><span class="sw" style="background:var(--red)"></span>En retard (non chargé, fenêtre)</span>
+    <span><span class="sw" style="background:var(--silver)"></span>Chargé</span>
+    <span><span class="sw" style="background:#D6001C"></span>En retard (non chargé, fenêtre)</span>
     <span><span class="sw" style="background:var(--blue)"></span>Prêt à charger</span>
-    <span><span class="sw" style="background:var(--orange)"></span>Pas fabriqué (&lt; 99 %)</span>
+    <span><span class="sw" style="background:var(--amber)"></span>Pas fabriqué (&lt; 99 %)</span>
   </div></div>`;
 
   if (late.length) {
@@ -757,6 +814,16 @@ function renderUsine(rs, name, W) {
   } else {
     html += `<div class="empty-note">✔ Aucune séquence en retard dans la fenêtre de ${W} jours ouvrables.</div>`;
   }
+  if (residus.length) {
+    html += `<div class="sec-title" style="color:#B8860B">Résidus à finaliser <small>— séquences quasi chargées, moins de ${SEUIL_RESIDU_LBS.toLocaleString('fr-CA')} lbs restants (non comptées en retard)</small></div>`;
+    html += `<table><thead><tr><th>Projet–Séq.</th><th>Chantier</th><th>Livraison</th><th>Limite chargement</th><th>Chargé %</th><th class="num">Poids restant (lbs)</th></tr></thead><tbody>`;
+    residus.forEach(r => {
+      const pc = Math.min(r.pctChg,100);
+      html += `<tr><td><strong>${r.projet}</strong>–${r.seq || '—'}</td><td>${r.nom}</td><td>${fmtDate(r.dateReq)}</td><td><strong>${fmtDate(r.dateLimite)}</strong></td><td><span class="tag o">${(Math.floor(pc*10)/10).toFixed(1).replace('.', ',')} %</span></td><td class="num">${r.poidsRest.toLocaleString('fr-CA')}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+
   if (fabRisk.length) {
     html += `<div class="sec-title" style="color:var(--orange-dark)">Vigie fabrication <small>— fab &lt; 99 %, requis dans moins de ${W*2} j. ouvrables (risque de retard à venir)</small></div>`;
     html += tableFor(fabRisk, false);
@@ -766,12 +833,16 @@ function renderUsine(rs, name, W) {
 }
 
 function tableFor(rows, isLate) {
-  let h = `<table><thead><tr><th>Projet–Séq.</th><th>Chantier</th><th>Opération</th><th>Date requise</th><th>J. ouvr.</th><th>Fab %</th><th>Chargé %</th><th class="num">Poids (lbs)</th><th class="num">Rem rest.</th><th>Transporteur</th></tr></thead><tbody>`;
+  let h = `<table><thead><tr><th>Projet–Séq.</th><th>Chantier</th><th>Opération</th><th>Livraison chantier</th><th>Limite chargement</th><th>J. ouvr.</th><th>Fab %</th><th>Chargé %</th><th class="num">Poids (lbs)</th><th class="num">Rem rest.</th><th>Transporteur</th></tr></thead><tbody>`;
   rows.forEach(r => {
-    const joTag = r.jo <= 0 ? `<span class="tag r">${r.jo === 0 ? 'aujourd\u2019hui' : 'passé (' + r.jo + ')'}</span>` : (r.inWindow ? `<span class="tag ${isLate ? 'r' : 'o'}">${r.jo} j</span>` : `<span class="tag g">${r.jo} j</span>`);
-    const fabTag = r.pctFab >= 99 ? `<span class="tag g">${r.pctFab.toFixed(0)} %</span>` : `<span class="tag o">${r.pctFab.toFixed(0)} %</span>`;
-    const chgTag = r.pctChg > 0 ? `<span class="tag b">${Math.min(r.pctChg,100).toFixed(0)} %</span>` : `<span class="tag r">0 %</span>`;
-    h += `<tr class="${isLate ? 'late' : ''}"><td><strong>${r.projet}</strong>–${r.seq || '—'}</td><td>${r.nom}</td><td>${r.op}</td><td>${fmtDate(r.dateReq)}</td><td>${joTag}</td><td>${fabTag}</td><td>${chgTag}</td><td class="num">${r.poids.toLocaleString('fr-CA')}</td><td class="num">${r.remRest}</td><td>${r.transporteur}</td></tr>`;
+    const joTag = r.jo <= 0 ? `<span class="tag r">${r.jo === 0 ? '\u26a0 CRITIQUE aujourd\u2019hui' : '\u26a0 D\u00c9PASS\u00c9 (' + r.jo + ' j)'}</span>` : (r.inWindow ? `<span class="tag ${isLate ? 'r' : 'o'}">${r.jo} j</span>` : `<span class="tag g">${r.jo} j</span>`);
+    const pf = r.pctFab;
+    const pfTxt = (pf >= 100 || pf === 0) ? pf.toFixed(0) : (Math.floor(pf*10)/10).toFixed(1).replace('.', ',');
+    const fabTag = pf >= 99 ? `<span class="tag g">${pfTxt} %</span>` : `<span class="tag o">${pfTxt} %</span>`;
+    const pc = Math.min(r.pctChg,100);
+    const pcTxt = (pc >= 100 || pc === 0) ? pc.toFixed(0) : (Math.floor(pc*10)/10).toFixed(1).replace('.', ',');
+    const chgTag = pc > 0 ? `<span class="tag ${r.residu ? 'o' : 'b'}">${pcTxt} %</span>` : `<span class="tag r">0 %</span>`;
+    h += `<tr class="${isLate ? 'late' : ''}"><td><strong>${r.projet}</strong>–${r.seq || '—'}</td><td>${r.nom}</td><td>${r.op}</td><td>${fmtDate(r.dateReq)}</td><td><strong>${fmtDate(r.dateLimite)}</strong></td><td>${joTag}</td><td>${fabTag}</td><td>${chgTag}</td><td class="num">${r.poids.toLocaleString('fr-CA')}</td><td class="num">${r.remRest}</td><td>${r.transporteur}</td></tr>`;
   });
   return h + `</tbody></table>`;
 }
@@ -858,7 +929,9 @@ function readFile(f) {
 $('dropzone').addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) readFile(f); });
 $('importDate').onchange = render;
 $('windowDays').onchange = render;
+$('transitDays').onchange = () => { try { localStorage.setItem('kpiChargementBA_transit', $('transitDays').value); } catch(e) {} render(); };
 $('chkFeries').onchange = render;
+$('opFilter').onchange = () => { try { localStorage.setItem('kpiChargementBA_op', $('opFilter').value); } catch(e) {} render(); };
 $('customHolidays').onchange = () => { try { localStorage.setItem('kpiChargementBA_custom', $('customHolidays').value); } catch(e) {} render(); };
 
 function syncSimUI() {
@@ -897,6 +970,10 @@ $('btnSimClear').onclick = () => {
 try {
   const custom = localStorage.getItem('kpiChargementBA_custom');
   if (custom) $('customHolidays').value = custom;
+  const savedOp = localStorage.getItem('kpiChargementBA_op');
+  if (savedOp) $('opFilter').value = savedOp;
+  const savedTransit = localStorage.getItem('kpiChargementBA_transit');
+  if (savedTransit !== null) $('transitDays').value = savedTransit;
   const savedRegle = localStorage.getItem('kpiChargementBA_regle');
   if (savedRegle) $('regleSelect').value = savedRegle;
   const savedSim = localStorage.getItem('kpiChargementBA_sim');
@@ -907,7 +984,7 @@ try {
   const saved = JSON.parse(localStorage.getItem('kpiChargementBA') || 'null');
   if (saved && saved.rows && saved.rows.length) {
     rawRows = saved.rows.map(r => ({ ...r, dateReq: new Date(r.dateReq) }));
-    if (saved.importDate) $('importDate').value = saved.importDate;
+    dateImportData = saved.dateImport || saved.importDate || null;
     render();
   }
 
